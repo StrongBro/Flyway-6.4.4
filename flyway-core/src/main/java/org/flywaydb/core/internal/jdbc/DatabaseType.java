@@ -46,7 +46,8 @@ public enum DatabaseType {
     SYBASEASE_JTDS("Sybase ASE", Types.NULL, true),
     SYBASEASE_JCONNECT("Sybase ASE", Types.VARCHAR, true),
     SAPHANA("SAP HANA", Types.VARCHAR, true),
-    SNOWFLAKE("Snowflake", Types.VARCHAR, false);
+    SNOWFLAKE("Snowflake", Types.VARCHAR, false),
+    DM("DaMeng", Types.VARCHAR, true);
 
     private final String name;
 
@@ -115,11 +116,6 @@ public enum DatabaseType {
             return POSTGRESQL;
         }
         if (databaseProductName.startsWith("DB2")) {
-
-
-
-
-
             return DB2;
         }
         if (databaseProductName.startsWith("ASE")) {
@@ -139,6 +135,10 @@ public enum DatabaseType {
         }
         if (databaseProductName.startsWith("Snowflake")) {
             return SNOWFLAKE;
+        }
+        // 新增达梦数据库
+        if(databaseProductName.startsWith("DM")) {
+            return DM;
         }
         throw new FlywayException("Unsupported Database: " + databaseProductName);
     }

@@ -65,6 +65,7 @@ public class DriverDataSource implements DataSource {
         SQLLITE("jdbc:sqlite:", "org.sqlite.JDBC"),
         SQLSERVER("jdbc:sqlserver:", "com.microsoft.sqlserver.jdbc.SQLServerDriver"),
         SYBASE("jdbc:sybase:", "com.sybase.jdbc4.jdbc.SybDriver"),
+        DM("jdbc:dm:", "dm.jdbc.driver.DmDriver"),
         TEST_CONTAINERS("jdbc:tc:", "org.testcontainers.jdbc.ContainerDatabaseDriver");
 
         DriverType(String prefix, String driverClass) {
@@ -165,7 +166,6 @@ public class DriverDataSource implements DataSource {
             if (type == null) {
                 throw new FlywayException("Unable to autodetect JDBC driver for url: " + url);
             }
-
             driverClass = detectDriverForType(type);
         }
 
@@ -338,9 +338,9 @@ public class DriverDataSource implements DataSource {
             result.put("SESSIONVARIABLE:APPLICATION", APPLICATION_NAME);
         } else if (DriverType.FIREBIRD_SQL.equals(type) || DriverType.FIREBIRD.equals(type)) {
             result.put("processName", APPLICATION_NAME);
+        }else if (DriverType.DM.equals(type)) {
+            result.put("appName", APPLICATION_NAME);
         }
-
-
         return result;
     }
 
