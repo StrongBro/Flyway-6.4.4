@@ -28,30 +28,12 @@ import java.util.regex.Pattern;
 
 public class DMParser extends Parser {
 
-
-
-
-
-
-
-
-
-
-
-
-
     /**
      * Delimiter of PL/SQL blocks and statements.
      */
     private static final Delimiter PLSQL_DELIMITER = new Delimiter("/", true
 
-
-
     );
-
-
-
-
 
     private static final Pattern PLSQL_TYPE_BODY_REGEX = Pattern.compile(
             "^CREATE(\\sOR\\sREPLACE)?(\\s(NON)?EDITIONABLE)?\\sTYPE\\sBODY\\s([^\\s]*\\s)?(IS|AS)");

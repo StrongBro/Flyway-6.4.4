@@ -61,11 +61,12 @@ public class DMDatabase extends Database<DMConnection> {
 
     @Override
     public final void ensureSupported() {
-        ensureDatabaseIsRecentEnough("10");
+        // 只知道8版本开始，不知道能兼容到几, 先8.0-9.9版本
+        ensureDatabaseIsRecentEnough("8.0");
 
-        ensureDatabaseNotOlderThanOtherwiseRecommendUpgradeToFlywayEdition("12.2", org.flywaydb.core.internal.license.Edition.ENTERPRISE);
-
-        recommendFlywayUpgradeIfNecessary("19.0");
+        ensureDatabaseNotOlderThanOtherwiseRecommendUpgradeToFlywayEdition("9.9", org.flywaydb.core.internal.license.Edition.ENTERPRISE);
+        //推荐就是8以上
+        recommendFlywayUpgradeIfNecessary("8.x");
     }
 
     @Override
