@@ -45,35 +45,8 @@ import java.util.List;
 @SuppressWarnings("SqlResolve")
 public class OracleSqlScriptExecutor extends DefaultSqlScriptExecutor {
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    public OracleSqlScriptExecutor(JdbcTemplate jdbcTemplate
-
-
-
-
-    ) {
-        super(jdbcTemplate
-
-
-
-        );
+    public OracleSqlScriptExecutor(JdbcTemplate jdbcTemplate) {
+        super(jdbcTemplate);
     }
 
 

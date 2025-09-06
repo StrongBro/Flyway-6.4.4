@@ -29,6 +29,9 @@ import org.flywaydb.core.internal.database.db2.DB2Parser;
 import org.flywaydb.core.internal.database.derby.DerbyDatabase;
 import org.flywaydb.core.internal.database.derby.DerbyParser;
 
+import org.flywaydb.core.internal.database.dm.DMDatabase;
+import org.flywaydb.core.internal.database.dm.DMParser;
+import org.flywaydb.core.internal.database.dm.DMSqlScriptExecutor;
 import org.flywaydb.core.internal.database.firebird.FirebirdDatabase;
 import org.flywaydb.core.internal.database.firebird.FirebirdParser;
 import org.flywaydb.core.internal.database.h2.H2Database;
@@ -91,11 +94,7 @@ public class DatabaseFactory {
      * @return The appropriate Database class.
      */
     public static Database createDatabase(Configuration configuration, boolean printInfo,
-                                          JdbcConnectionFactory jdbcConnectionFactory
-
-
-
-    ) {
+                                          JdbcConnectionFactory jdbcConnectionFactory) {
         OracleDatabase.enableTnsnamesOraSupport();
 
         String databaseProductName = jdbcConnectionFactory.getProductName();
@@ -106,131 +105,56 @@ public class DatabaseFactory {
 
         DatabaseType databaseType = jdbcConnectionFactory.getDatabaseType();
 
-        Database database = createDatabase(databaseType, configuration, jdbcConnectionFactory
-
-
-
-        );
+        Database database = createDatabase(databaseType, configuration, jdbcConnectionFactory);
 
         String intendedCurrentSchema = configuration.getDefaultSchema();
         if (!database.supportsChangingCurrentSchema() && intendedCurrentSchema != null) {
             LOG.warn(databaseProductName + " does not support setting the schema for the current session. " +
                     "Default schema will NOT be changed to " + intendedCurrentSchema + " !");
         }
-
         return database;
     }
 
     private static Database createDatabase(DatabaseType databaseType, Configuration configuration,
-                                           JdbcConnectionFactory jdbcConnectionFactory
-
-
-
-    ) {
+                                           JdbcConnectionFactory jdbcConnectionFactory) {
         switch (databaseType) {
             case COCKROACHDB:
-                return new CockroachDBDatabase(configuration, jdbcConnectionFactory
-
-
-
-                );
+                return new CockroachDBDatabase(configuration, jdbcConnectionFactory);
             case DB2:
-                return new DB2Database(configuration, jdbcConnectionFactory
-
-
-
-                );
-
-
-
-
+                return new DB2Database(configuration, jdbcConnectionFactory);
 
             case DERBY:
-                return new DerbyDatabase(configuration, jdbcConnectionFactory
-
-
-
-                );
+                return new DerbyDatabase(configuration, jdbcConnectionFactory);
             case FIREBIRD:
-                return new FirebirdDatabase(configuration, jdbcConnectionFactory
-
-
-
-                );
+                return new FirebirdDatabase(configuration, jdbcConnectionFactory);
             case H2:
-                return new H2Database(configuration, jdbcConnectionFactory
-
-
-
-                );
+                return new H2Database(configuration, jdbcConnectionFactory);
             case HSQLDB:
-                return new HSQLDBDatabase(configuration, jdbcConnectionFactory
-
-
-
-                );
+                return new HSQLDBDatabase(configuration, jdbcConnectionFactory);
             case INFORMIX:
-                return new InformixDatabase(configuration, jdbcConnectionFactory
-
-
-
-                );
+                return new InformixDatabase(configuration, jdbcConnectionFactory);
             case MARIADB:
             case MYSQL:
-                return new MySQLDatabase(configuration, jdbcConnectionFactory
-
-
-
-                );
+                return new MySQLDatabase(configuration, jdbcConnectionFactory);
             case ORACLE:
-                return new OracleDatabase(configuration, jdbcConnectionFactory
-
-
-
-                );
+                return new OracleDatabase(configuration, jdbcConnectionFactory);
             case POSTGRESQL:
-                return new PostgreSQLDatabase(configuration, jdbcConnectionFactory
-
-
-
-                );
+                return new PostgreSQLDatabase(configuration, jdbcConnectionFactory);
             case REDSHIFT:
-                return new RedshiftDatabase(configuration, jdbcConnectionFactory
-
-
-
-                );
+                return new RedshiftDatabase(configuration, jdbcConnectionFactory);
             case SNOWFLAKE:
-                return new SnowflakeDatabase(configuration, jdbcConnectionFactory
-
-
-
-                );
+                return new SnowflakeDatabase(configuration, jdbcConnectionFactory);
             case SQLITE:
-                return new SQLiteDatabase(configuration, jdbcConnectionFactory
-
-
-
-                );
+                return new SQLiteDatabase(configuration, jdbcConnectionFactory);
             case SAPHANA:
-                return new SAPHANADatabase(configuration, jdbcConnectionFactory
-
-
-
-                );
+                return new SAPHANADatabase(configuration, jdbcConnectionFactory);
             case SQLSERVER:
-                return new SQLServerDatabase(configuration, jdbcConnectionFactory
-
-
-
-                );
+                return new SQLServerDatabase(configuration, jdbcConnectionFactory);
+            case DM:
+                return new DMDatabase(configuration, jdbcConnectionFactory);
             case SYBASEASE_JCONNECT:
             case SYBASEASE_JTDS:
-                return new SybaseASEDatabase(configuration, jdbcConnectionFactory
-
-
-
-                );
+                return new SybaseASEDatabase(configuration, jdbcConnectionFactory);
             default:
                 throw new FlywayException("Unsupported Database: " + databaseType.name());
         }
@@ -240,54 +164,26 @@ public class DatabaseFactory {
                                                           final Configuration configuration,
                                                           final ParsingContext parsingContext) {
         final DatabaseType databaseType = jdbcConnectionFactory.getDatabaseType();
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-            return new SqlScriptFactory() {
-                @Override
-                public SqlScript createSqlScript(LoadableResource resource, boolean mixed, ResourceProvider resourceProvider) {
-                    return new ParserSqlScript(createParser(jdbcConnectionFactory, configuration
-
-
-
-                            , parsingContext
-                    ), resource, getMetadataResource(resourceProvider, resource), mixed);
-                }
-            };
-
-
-
+        return new SqlScriptFactory() {
+            @Override
+            public SqlScript createSqlScript(LoadableResource resource, boolean mixed, ResourceProvider resourceProvider) {
+                return new ParserSqlScript(
+                        createParser(jdbcConnectionFactory, configuration, parsingContext),
+                        resource,
+                        getMetadataResource(resourceProvider, resource)
+                        , mixed
+                );
+            }
+        };
     }
 
-    private static Parser createParser(JdbcConnectionFactory jdbcConnectionFactory, Configuration configuration
-
-
-
-            , ParsingContext parsingContext
-    ) {
+    private static Parser createParser(JdbcConnectionFactory jdbcConnectionFactory, Configuration configuration, ParsingContext parsingContext) {
         final DatabaseType databaseType = jdbcConnectionFactory.getDatabaseType();
-
         switch (databaseType) {
             case COCKROACHDB:
                 return new CockroachDBParser(configuration, parsingContext);
             case DB2:
                 return new DB2Parser(configuration, parsingContext);
-
-
-
-
             case DERBY:
                 return new DerbyParser(configuration, parsingContext);
             case FIREBIRD:
@@ -302,19 +198,7 @@ public class DatabaseFactory {
             case MYSQL:
                 return new MySQLParser(configuration, parsingContext);
             case ORACLE:
-                return new OracleParser(configuration
-
-
-
-
-
-
-
-
-
-
-                        , parsingContext
-                );
+                return new OracleParser(configuration, parsingContext);
             case POSTGRESQL:
                 return new PostgreSQLParser(configuration, parsingContext);
             case REDSHIFT:
@@ -327,6 +211,8 @@ public class DatabaseFactory {
                 return new SnowflakeParser(configuration, parsingContext);
             case SQLSERVER:
                 return new SQLServerParser(configuration, parsingContext);
+            case DM:
+                return new DMParser(configuration, parsingContext);
             case SYBASEASE_JCONNECT:
             case SYBASEASE_JTDS:
                 return new SybaseASEParser(configuration, parsingContext);
@@ -336,46 +222,29 @@ public class DatabaseFactory {
     }
 
     public static SqlScriptExecutorFactory createSqlScriptExecutorFactory(
-            final JdbcConnectionFactory jdbcConnectionFactory
-
-
-
-
-    ) {
+            final JdbcConnectionFactory jdbcConnectionFactory) {
         final DatabaseType databaseType = jdbcConnectionFactory.getDatabaseType();
-
-
-
-
         if (DatabaseType.ORACLE == databaseType) {
             return new SqlScriptExecutorFactory() {
                 @Override
-                public SqlScriptExecutor createSqlScriptExecutor(Connection connection
-
-
-
-                ) {
-                    return new OracleSqlScriptExecutor(new JdbcTemplate(connection, databaseType)
-
-
-
-                    );
+                public SqlScriptExecutor createSqlScriptExecutor(Connection connection) {
+                    return new OracleSqlScriptExecutor(new JdbcTemplate(connection, databaseType));
+                }
+            };
+        }
+        if (DatabaseType.DM == databaseType) {
+            return new SqlScriptExecutorFactory() {
+                @Override
+                public SqlScriptExecutor createSqlScriptExecutor(Connection connection) {
+                    return new DMSqlScriptExecutor(new JdbcTemplate(connection, databaseType));
                 }
             };
         }
 
         return new SqlScriptExecutorFactory() {
             @Override
-            public SqlScriptExecutor createSqlScriptExecutor(Connection connection
-
-
-
-            ) {
-                return new DefaultSqlScriptExecutor(new JdbcTemplate(connection, databaseType)
-
-
-
-                );
+            public SqlScriptExecutor createSqlScriptExecutor(Connection connection) {
+                return new DefaultSqlScriptExecutor(new JdbcTemplate(connection, databaseType));
             }
         };
     }
