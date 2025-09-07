@@ -74,6 +74,7 @@ import java.util.*;
 public class Flyway {
     private static final Log LOG = LogFactory.getLog(Flyway.class);
 
+    //配置文件，包含数据源，所有Flyway默认或自定义配置项
     private final ClassicConfiguration configuration;
 
     /**
@@ -156,10 +157,9 @@ public class Flyway {
      * @throws FlywayException when the migration failed.
      */
     public int migrate() throws FlywayException {
-        return execute(new Command<Integer>() {
-            public Integer execute(MigrationResolver migrationResolver,
-                                   SchemaHistory schemaHistory, Database database, Schema[] schemas, CallbackExecutor callbackExecutor
-            ) {
+        Command<Integer> command = new Command<Integer>() {
+            @Override
+            public Integer execute(MigrationResolver migrationResolver, SchemaHistory schemaHistory, Database database, Schema[] schemas, CallbackExecutor callbackExecutor) {
                 if (configuration.isValidateOnMigrate()) {
                     doValidate(database, migrationResolver, schemaHistory, schemas, callbackExecutor,
                             true // Always ignore pending migrations when validating before migrating
@@ -195,7 +195,8 @@ public class Flyway {
                 return new DbMigrate(database, schemaHistory, schemas[0], migrationResolver, configuration,
                         callbackExecutor).migrate();
             }
-        }, true);
+        };
+        return execute(command,true);
     }
 
     private void doBaseline(SchemaHistory schemaHistory, CallbackExecutor callbackExecutor) {
@@ -378,7 +379,8 @@ public class Flyway {
      * @param <T>     The type of the result.
      * @return The result of the command.
      */
-    /*private -> testing*/ <T> T execute(Command<T> command, boolean scannerRequired) {
+    /*private -> testing*/
+    <T> T execute(Command<T> command, boolean scannerRequired) {
         T result;
         VersionPrinter.printVersion();
         configurationValidator.validate(configuration);

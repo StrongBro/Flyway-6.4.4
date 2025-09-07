@@ -181,6 +181,7 @@ public class DriverDataSource implements DataSource {
                         + " => Check whether the jar file is present", e,
                         ErrorCode.JDBC_DRIVER);
             }
+
             try {
                 this.driver = ClassUtils.instantiate(backupDriverClass, classLoader);
             } catch (Exception e1) {
