@@ -34,6 +34,7 @@ import static org.flywaydb.core.internal.database.dm.DMSchema.ObjectType.*;
 public class DMSchema extends Schema<DMDatabase, DMTable> {
     private static final Log LOG = LogFactory.getLog(DMSchema.class);
 
+    private static final String DM_TEMP_USER_SUFFIX = "_FLYWAY_USER";
     /**
      * Creates a new DM schema.
      *
@@ -75,7 +76,8 @@ public class DMSchema extends Schema<DMDatabase, DMTable> {
 
     @Override
     protected void doCreate() throws SQLException {
-        jdbcTemplate.execute("CREATE USER " + database.quote(name) + " IDENTIFIED BY "
+        System.out.println("CREATE USER " + database.quote(name) + " IDENTIFIED BY " + database.quote("FFllyywwaayy00!!"));
+        jdbcTemplate.execute("CREATE USER " + database.quote(name + DM_TEMP_USER_SUFFIX) + " IDENTIFIED BY "
                 + database.quote("FFllyywwaayy00!!"));
         jdbcTemplate.execute("GRANT RESOURCE TO " + database.quote(name));
         jdbcTemplate.execute("GRANT UNLIMITED TABLESPACE TO " + database.quote(name));
@@ -83,7 +85,7 @@ public class DMSchema extends Schema<DMDatabase, DMTable> {
 
     @Override
     protected void doDrop() throws SQLException {
-        jdbcTemplate.execute("DROP USER " + database.quote(name) + " CASCADE");
+        jdbcTemplate.execute("DROP USER " + database.quote(name + DM_TEMP_USER_SUFFIX) + " CASCADE");
     }
 
     @Override
@@ -94,73 +96,33 @@ public class DMSchema extends Schema<DMDatabase, DMTable> {
         }
 
         // Disable FBA for schema tables.
-        if (database.isFlashbackDataArchiveAvailable()) {
-            disableFlashbackArchiveForFbaTrackedTables();
-        }
+        //达梦数据库的Flashback Archive功能不支持
+//        if (database.isFlashbackDataArchiveAvailable()) {
+//            disableFlashbackArchiveForFbaTrackedTables();
+//        }
 
         // Clean DM Locator metadata.
-        if (database.isLocatorAvailable()) {
-            cleanLocatorMetadata();
-        }
+//        if (database.isLocatorAvailable()) {
+//            cleanLocatorMetadata();
+//        }
 
         // Get existing object types in the schema.
         Set<String> objectTypeNames = getObjectTypeNames(jdbcTemplate, database, this);
 
         // Define the list of types to process, order is important.
         List<ObjectType> objectTypesToClean = Arrays.asList(
-                // Types to drop.
                 TRIGGER,
-                QUEUE_TABLE,
-                FILE_WATCHER,
-                SCHEDULER_CHAIN,
-                SCHEDULER_JOB,
-                SCHEDULER_PROGRAM,
-                SCHEDULE,
-                RULE_SET,
-                RULE,
-                EVALUATION_CONTEXT,
-                FILE_GROUP,
-                XML_SCHEMA,
-                MINING_MODEL,
-                REWRITE_EQUIVALENCE,
-                SQL_TRANSLATION_PROFILE,
-                MATERIALIZED_VIEW,
-                MATERIALIZED_VIEW_LOG,
-                DIMENSION,
                 VIEW,
-                DOMAIN_INDEX,
-                DOMAIN_INDEX_TYPE,
                 TABLE,
                 INDEX,
-                CLUSTER,
                 SEQUENCE,
-                OPERATOR,
-                FUNCTION,
                 PROCEDURE,
+                FUNCTION,
                 PACKAGE,
-                CONTEXT,
-                LIBRARY,
+                DM_PACKAGE_BODY,
                 TYPE,
                 SYNONYM,
-                JAVA_SOURCE,
-                JAVA_CLASS,
-                JAVA_RESOURCE,
-
-                // Object types with sensitive information (passwords), skip intentionally, print warning if found.
-                DATABASE_LINK,
-                CREDENTIAL,
-
-                // Unsupported types, print warning if found
-                DATABASE_DESTINATION,
-                SCHEDULER_GROUP,
-                CUBE,
-                CUBE_DIMENSION,
-                CUBE_BUILD_PROCESS,
-                MEASURE_FOLDER,
-
-                // Undocumented types, print warning if found
-                ASSEMBLY,
-                JAVA_DATA
+                DATABASE_LINK
         );
 
         for (ObjectType objectType : objectTypesToClean) {
@@ -170,9 +132,10 @@ public class DMSchema extends Schema<DMDatabase, DMTable> {
             }
         }
 
-        if (isDefaultSchemaForUser()) {
-            jdbcTemplate.execute("PURGE RECYCLEBIN");
-        }
+//        if (isDefaultSchemaForUser()) {
+//            //oracle 清空回收站, 达梦不支持
+//            jdbcTemplate.execute("PURGE RECYCLEBIN");
+//        }
     }
 
     /**
@@ -278,429 +241,154 @@ public class DMSchema extends Schema<DMDatabase, DMTable> {
      * DM object types.
      */
     public enum ObjectType {
-        // Tables, including XML tables, except for nested tables, IOT overflow tables and other secondary objects.
-        TABLE("TABLE", "CASCADE CONSTRAINTS PURGE") {
+        // 表（达梦基础对象）
+        TABLE("TABLE", "CASCADE CONSTRAINTS") {
             @Override
             public List<String> getObjectNames(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema) throws SQLException {
-                boolean referencePartitionedTablesExist = database.queryReturnsRows(
-                        "SELECT * FROM ALL_PART_TABLES WHERE OWNER = ? AND PARTITIONING_TYPE = 'REFERENCE'",
-                        schema.getName());
-                boolean xmlDbAvailable = database.isXmlDbAvailable();
-
-                StringBuilder tablesQuery = new StringBuilder();
-                tablesQuery.append("WITH TABLES AS (\n" +
-                        "  SELECT TABLE_NAME, OWNER\n" +
-                        "  FROM ALL_TABLES\n" +
-                        "  WHERE OWNER = ?\n" +
-                        "    AND (IOT_TYPE IS NULL OR IOT_TYPE NOT LIKE '%OVERFLOW%')\n" +
-                        "    AND NESTED != 'YES'\n" +
-                        "    AND SECONDARY != 'Y'\n");
-
-                if (xmlDbAvailable) {
-                    tablesQuery.append("  UNION ALL\n" +
-                            "  SELECT TABLE_NAME, OWNER\n" +
-                            "  FROM ALL_XML_TABLES\n" +
-                            "  WHERE OWNER = ?\n" +
-                            // ALL_XML_TABLES shows objects in RECYCLEBIN, ignore them
-                            "    AND TABLE_NAME NOT LIKE 'BIN$________________________$_'\n");
-                }
-
-                tablesQuery.append(")\n" +
-                        "SELECT t.TABLE_NAME\n" +
-                        "FROM TABLES t\n");
-
-                // Reference partitioned tables should be dropped in child-to-parent order.
-                if (referencePartitionedTablesExist) {
-                    tablesQuery.append("  LEFT JOIN ALL_PART_TABLES pt\n" +
-                            "    ON t.OWNER = pt.OWNER\n" +
-                            "   AND t.TABLE_NAME = pt.TABLE_NAME\n" +
-                            "   AND pt.PARTITIONING_TYPE = 'REFERENCE'\n" +
-                            "  LEFT JOIN ALL_CONSTRAINTS fk\n" +
-                            "    ON pt.OWNER = fk.OWNER\n" +
-                            "   AND pt.TABLE_NAME = fk.TABLE_NAME\n" +
-                            "   AND pt.REF_PTN_CONSTRAINT_NAME = fk.CONSTRAINT_NAME\n" +
-                            "   AND fk.CONSTRAINT_TYPE = 'R'\n" +
-                            "  LEFT JOIN ALL_CONSTRAINTS puk\n" +
-                            "    ON fk.R_OWNER = puk.OWNER\n" +
-                            "   AND fk.R_CONSTRAINT_NAME = puk.CONSTRAINT_NAME\n" +
-                            "   AND puk.CONSTRAINT_TYPE IN ('P', 'U')\n" +
-                            "  LEFT JOIN TABLES p\n" +
-                            "    ON puk.OWNER = p.OWNER\n" +
-                            "   AND puk.TABLE_NAME = p.TABLE_NAME\n" +
-                            "START WITH p.TABLE_NAME IS NULL\n" +
-                            "CONNECT BY PRIOR t.TABLE_NAME = p.TABLE_NAME\n" +
-                            "ORDER BY LEVEL DESC");
-                }
-
-                int n = 1 + (xmlDbAvailable ? 1 : 0);
-                String[] params = new String[n];
-                Arrays.fill(params, schema.getName());
-
-                return jdbcTemplate.queryForStringList(tablesQuery.toString(), params);
-            }
-        },
-
-        // Queue tables, have related objects and should be dropped separately prior to other types.
-        QUEUE_TABLE("QUEUE TABLE") {
-            @Override
-            public List<String> getObjectNames(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema) throws SQLException {
+                // 简化查询，移除Oracle特有的逻辑
                 return jdbcTemplate.queryForStringList(
-                        "SELECT QUEUE_TABLE FROM ALL_QUEUE_TABLES WHERE OWNER = ?",
+                        "SELECT TABLE_NAME FROM DBA_TABLES WHERE OWNER = ?",
                         schema.getName()
                 );
             }
-
-            @Override
-            public String generateDropStatement(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema, String objectName) {
-                return "BEGIN DBMS_AQADM.DROP_QUEUE_TABLE('" + database.quote(schema.getName(), objectName) + "', FORCE => TRUE); END;";
-            }
         },
 
-        // Materialized view logs.
-        MATERIALIZED_VIEW_LOG("MATERIALIZED VIEW LOG") {
-            @Override
-            public List<String> getObjectNames(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema) throws SQLException {
-                return jdbcTemplate.queryForStringList(
-                        "SELECT MASTER FROM ALL_MVIEW_LOGS WHERE LOG_OWNER = ?",
-                        schema.getName()
-                );
-            }
-
-            @Override
-            public String generateDropStatement(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema, String objectName) {
-                return "DROP " + this.getName() + " ON " + database.quote(schema.getName(), objectName);
-            }
-        },
-
-        // All indexes, except for domain indexes, should be dropped after tables (if any left).
+        // 索引（达梦支持）
         INDEX("INDEX") {
             @Override
             public List<String> getObjectNames(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema) throws SQLException {
                 return jdbcTemplate.queryForStringList(
-                        "SELECT INDEX_NAME FROM ALL_INDEXES WHERE OWNER = ?" +
-                                //" AND INDEX_NAME NOT LIKE 'SYS_C%'"+
-                                " AND INDEX_TYPE NOT LIKE '%DOMAIN%'",
+                        "SELECT INDEX_NAME FROM DBA_INDEXES WHERE OWNER = ?",
                         schema.getName()
                 );
             }
         },
 
-        // Domain indexes, have related objects and should be dropped separately prior to tables.
-        DOMAIN_INDEX("INDEX", "FORCE") {
+        // 视图（达梦支持）
+        VIEW("VIEW", "CASCADE CONSTRAINTS") {
             @Override
             public List<String> getObjectNames(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema) throws SQLException {
                 return jdbcTemplate.queryForStringList(
-                        "SELECT INDEX_NAME FROM ALL_INDEXES WHERE OWNER = ? AND INDEX_TYPE LIKE '%DOMAIN%'",
+                        "SELECT VIEW_NAME FROM DBA_VIEWS WHERE OWNER = ?",
                         schema.getName()
                 );
             }
         },
 
-        // Domain index types.
-        DOMAIN_INDEX_TYPE("INDEXTYPE", "FORCE"),
-
-        // Operators.
-        OPERATOR("OPERATOR", "FORCE"),
-
-        // Clusters.
-        CLUSTER("CLUSTER", "INCLUDING TABLES CASCADE CONSTRAINTS"),
-
-        // Views, including XML views.
-        VIEW("VIEW", "CASCADE CONSTRAINTS"),
-
-        // Materialized views, keep tables as they may be referenced.
-        MATERIALIZED_VIEW("MATERIALIZED VIEW", "PRESERVE TABLE"),
-
-        // Dimensions.
-        DIMENSION("DIMENSION") {
+        // 序列（达梦支持）
+        SEQUENCE("SEQUENCE") {
             @Override
             public List<String> getObjectNames(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema) throws SQLException {
                 return jdbcTemplate.queryForStringList(
-                        "SELECT DIMENSION_NAME FROM ALL_DIMENSIONS WHERE OWNER = ?",
+                        "SELECT SEQUENCE_NAME FROM DBA_SEQUENCES WHERE SEQUENCE_OWNER = ?",
                         schema.getName()
                 );
             }
         },
 
-        // Local synonyms.
-        SYNONYM("SYNONYM", "FORCE"),
-
-        // Sequences, no filtering for identity sequences, since they get dropped along with master tables.
-        SEQUENCE("SEQUENCE"),
-
-        // Procedures, functions, packages.
-        PROCEDURE("PROCEDURE"),
-        FUNCTION("FUNCTION"),
-        PACKAGE("PACKAGE"),
-
-        // Contexts, seen in DBA_CONTEXT view, may remain if DBA_CONTEXT is not accessible.
-        CONTEXT("CONTEXT") {
+        // 存储过程（达梦支持）
+        PROCEDURE("PROCEDURE") {
             @Override
             public List<String> getObjectNames(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema) throws SQLException {
                 return jdbcTemplate.queryForStringList(
-                        "SELECT NAMESPACE FROM " + database.dbaOrAll("CONTEXT") + " WHERE SCHEMA = ?",
+                        "SELECT OBJECT_NAME FROM DBA_OBJECTS WHERE OWNER = ? AND OBJECT_TYPE = 'PROCEDURE'",
                         schema.getName()
                 );
             }
-
-            @Override
-            public String generateDropStatement(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema, String objectName) {
-                return "DROP " + this.getName() + " " + database.quote(objectName); // no owner
-            }
         },
 
-        // Triggers of all types, should be dropped at first, because invalid DDL triggers may break the whole clean.
-        TRIGGER("TRIGGER"),
-
-        // Types.
-        TYPE("TYPE", "FORCE"),
-
-        // Java sources, classes, resources.
-        JAVA_SOURCE("JAVA SOURCE"),
-        JAVA_CLASS("JAVA CLASS"),
-        JAVA_RESOURCE("JAVA RESOURCE"),
-
-        // Libraries.
-        LIBRARY("LIBRARY"),
-
-        // XML schemas.
-        XML_SCHEMA("XML SCHEMA") {
+        // 函数（达梦支持）
+        FUNCTION("FUNCTION") {
             @Override
             public List<String> getObjectNames(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema) throws SQLException {
-                if (!database.isXmlDbAvailable()) {
-                    return Collections.emptyList();
-                }
                 return jdbcTemplate.queryForStringList(
-                        "SELECT QUAL_SCHEMA_URL FROM " + database.dbaOrAll("XML_SCHEMAS") + " WHERE OWNER = ?",
+                        "SELECT OBJECT_NAME FROM DBA_OBJECTS WHERE OWNER = ? AND OBJECT_TYPE = 'FUNCTION'",
                         schema.getName()
                 );
             }
-
-            @Override
-            public String generateDropStatement(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema, String objectName) {
-                return "BEGIN DBMS_XMLSCHEMA.DELETESCHEMA('" + objectName + "', DELETE_OPTION => DBMS_XMLSCHEMA.DELETE_CASCADE_FORCE); END;";
-            }
         },
 
-        // Rewrite equivalences.
-        REWRITE_EQUIVALENCE("REWRITE EQUIVALENCE") {
-            @Override
-            public String generateDropStatement(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema, String objectName) {
-                return "BEGIN SYS.DBMS_ADVANCED_REWRITE.DROP_REWRITE_EQUIVALENCE('" + database.quote(schema.getName(), objectName) + "'); END;";
-            }
-        },
-
-        // SQL translation profiles.
-        SQL_TRANSLATION_PROFILE("SQL TRANSLATION PROFILE") {
-            @Override
-            public String generateDropStatement(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema, String objectName) {
-                return "BEGIN DBMS_SQL_TRANSLATOR.DROP_PROFILE('" + database.quote(schema.getName(), objectName) + "'); END;";
-            }
-        },
-
-        // Data mining models, have related objects, should be dropped prior to tables.
-
-
-
-        MINING_MODEL("MINING MODEL") {
+        // 包（达梦支持）
+        PACKAGE("PACKAGE") {
             @Override
             public List<String> getObjectNames(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema) throws SQLException {
-
-
-
-                    return super.getObjectNames(jdbcTemplate, database, schema);
-
-
-
-
-
-
-
-            }
-
-            @Override
-            public String generateDropStatement(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema, String objectName) {
-                return "BEGIN DBMS_DATA_MINING.DROP_MODEL('" +
-
-
-
-                                database.quote(schema.getName(), objectName)
-
-
-
-                        + "'); END;";
+                return jdbcTemplate.queryForStringList(
+                        "SELECT OBJECT_NAME FROM DBA_OBJECTS WHERE OWNER = ? AND OBJECT_TYPE = 'PACKAGE'",
+                        schema.getName()
+                );
             }
         },
 
-        // Scheduler objects.
-        SCHEDULER_JOB("JOB") {
+        // 触发器（达梦支持）
+        TRIGGER("TRIGGER") {
             @Override
-            public String generateDropStatement(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema, String objectName) {
-                return "BEGIN DBMS_SCHEDULER.DROP_JOB('" + database.quote(schema.getName(), objectName) + "', FORCE => TRUE); END;";
-            }
-        },
-        SCHEDULER_PROGRAM("PROGRAM") {
-            @Override
-            public String generateDropStatement(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema, String objectName) {
-                return "BEGIN DBMS_SCHEDULER.DROP_PROGRAM('" + database.quote(schema.getName(), objectName) + "', FORCE => TRUE); END;";
-            }
-        },
-        SCHEDULE("SCHEDULE") {
-            @Override
-            public String generateDropStatement(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema, String objectName) {
-                return "BEGIN DBMS_SCHEDULER.DROP_SCHEDULE('" + database.quote(schema.getName(), objectName) + "', FORCE => TRUE); END;";
-            }
-        },
-        SCHEDULER_CHAIN("CHAIN") {
-            @Override
-            public String generateDropStatement(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema, String objectName) {
-                return "BEGIN DBMS_SCHEDULER.DROP_CHAIN('" + database.quote(schema.getName(), objectName) + "', FORCE => TRUE); END;";
-            }
-        },
-        FILE_WATCHER("FILE WATCHER") {
-            @Override
-            public String generateDropStatement(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema, String objectName) {
-                return "BEGIN DBMS_SCHEDULER.DROP_FILE_WATCHER('" + database.quote(schema.getName(), objectName) + "', FORCE => TRUE); END;";
+            public List<String> getObjectNames(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema) throws SQLException {
+                return jdbcTemplate.queryForStringList(
+                        "SELECT TRIGGER_NAME FROM DBA_TRIGGERS WHERE OWNER = ?",
+                        schema.getName()
+                );
             }
         },
 
-        // Streams/rule objects.
-        RULE_SET("RULE SET") {
+        // 同义词（达梦支持）
+        SYNONYM("SYNONYM") {
             @Override
-            public String generateDropStatement(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema, String objectName) {
-                return "BEGIN DBMS_RULE_ADM.DROP_RULE_SET('" + database.quote(schema.getName(), objectName) + "', DELETE_RULES => FALSE); END;";
-            }
-        },
-        RULE("RULE") {
-            @Override
-            public String generateDropStatement(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema, String objectName) {
-                return "BEGIN DBMS_RULE_ADM.DROP_RULE('" + database.quote(schema.getName(), objectName) + "', FORCE => TRUE); END;";
-            }
-        },
-        EVALUATION_CONTEXT("EVALUATION CONTEXT") {
-            @Override
-            public String generateDropStatement(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema, String objectName) {
-                return "BEGIN DBMS_RULE_ADM.DROP_EVALUATION_CONTEXT('" + database.quote(schema.getName(), objectName) + "', FORCE => TRUE); END;";
-            }
-        },
-        FILE_GROUP("FILE GROUP") {
-            @Override
-            public String generateDropStatement(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema, String objectName) {
-                return "BEGIN DBMS_FILE_GROUP.DROP_FILE_GROUP('" + database.quote(schema.getName(), objectName) + "'); END;";
+            public List<String> getObjectNames(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema) throws SQLException {
+                return jdbcTemplate.queryForStringList(
+                        "SELECT SYNONYM_NAME FROM DBA_SYNONYMS WHERE OWNER = ?",
+                        schema.getName()
+                );
             }
         },
 
-
-        /*** Below are unsupported object types. They should be dropped explicitly in callbacks if used. ***/
-
-        // Database links and credentials, contain sensitive information (password) and hence not always can be re-created.
-        // Intentionally skip them and let the clean callbacks handle them if needed.
+        // 数据库链接（达梦支持DBLINK）
         DATABASE_LINK("DATABASE LINK") {
             @Override
-            public void dropObjects(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema) {
-                super.warnUnsupported(database.quote(schema.getName()));
-            }
-
-            @Override
             public List<String> getObjectNames(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema) throws SQLException {
                 return jdbcTemplate.queryForStringList(
-                        "SELECT DB_LINK FROM " + database.dbaOrAll("DB_LINKS") + " WHERE OWNER = ?",
+                        "SELECT DB_LINK FROM DBA_DB_LINKS WHERE OWNER = ?",
                         schema.getName()
                 );
             }
 
             @Override
             public String generateDropStatement(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema, String objectName) {
-                return "DROP " + this.getName() + " " + objectName; // db link name is case-insensitive and needs no owner
-            }
-        },
-        CREDENTIAL("CREDENTIAL") {
-            @Override
-            public void dropObjects(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema) {
-                super.warnUnsupported(database.quote(schema.getName()));
-            }
-
-            @Override
-            public String generateDropStatement(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema, String objectName) {
-                return "BEGIN DBMS_SCHEDULER.DROP_CREDENTIAL('" + database.quote(schema.getName(), objectName) + "', FORCE => TRUE); END;";
+                return "DROP DATABASE LINK " + objectName;
             }
         },
 
-        // Some scheduler types, not supported yet.
-        DATABASE_DESTINATION("DESTINATION") {
+        // 类型（达梦支持）
+        TYPE("TYPE") {
             @Override
-            public void dropObjects(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema) {
-                super.warnUnsupported(database.quote(schema.getName()));
-            }
-
-            @Override
-            public String generateDropStatement(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema, String objectName) {
-                return "BEGIN DBMS_SCHEDULER.DROP_DATABASE_DESTINATION('" + database.quote(schema.getName(), objectName) + "'); END;";
-            }
-        },
-        SCHEDULER_GROUP("SCHEDULER GROUP") {
-            @Override
-            public void dropObjects(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema) {
-                super.warnUnsupported(database.quote(schema.getName()));
-            }
-
-            @Override
-            public String generateDropStatement(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema, String objectName) {
-                return "BEGIN DBMS_SCHEDULER.DROP_GROUP('" + database.quote(schema.getName(), objectName) + "', FORCE => TRUE); END;";
+            public List<String> getObjectNames(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema) throws SQLException {
+                return jdbcTemplate.queryForStringList(
+                        "SELECT OBJECT_NAME FROM DBA_OBJECTS WHERE OWNER = ? AND OBJECT_TYPE = 'TYPE'",
+                        schema.getName()
+                );
             }
         },
 
-        // OLAP objects, not supported yet.
-        CUBE("CUBE") {
-            @Override
-            public void dropObjects(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema) {
-                super.warnUnsupported(database.quote(schema.getName()));
-            }
-        },
-        CUBE_DIMENSION("CUBE DIMENSION") {
-            @Override
-            public void dropObjects(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema) {
-                super.warnUnsupported(database.quote(schema.getName()));
-            }
-        },
-        CUBE_BUILD_PROCESS("CUBE BUILD PROCESS") {
-            @Override
-            public void dropObjects(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema) {
-                super.warnUnsupported(database.quote(schema.getName()), "cube build processes");
-            }
-        },
-        MEASURE_FOLDER("MEASURE FOLDER") {
-            @Override
-            public void dropObjects(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema) {
-                super.warnUnsupported(database.quote(schema.getName()));
-            }
-        },
+//        // 物化视图（达梦支持，但语法可能不同）
+//        MATERIALIZED_VIEW("MATERIALIZED VIEW") {
+//            @Override
+//            public List<String> getObjectNames(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema) throws SQLException {
+//                return jdbcTemplate.queryForStringList(
+//                        "SELECT MVIEW_NAME FROM DBA_MVIEWS WHERE OWNER = ?",
+//                        schema.getName()
+//                );
+//            }
+//        },
 
-        // Undocumented objects.
-        ASSEMBLY("ASSEMBLY") {
+        // 达梦特有的对象类型
+        DM_PACKAGE_BODY("PACKAGE BODY") {
             @Override
-            public void dropObjects(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema) {
-                super.warnUnsupported(database.quote(schema.getName()), "assemblies");
+            public List<String> getObjectNames(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema) throws SQLException {
+                return jdbcTemplate.queryForStringList(
+                        "SELECT OBJECT_NAME FROM DBA_OBJECTS WHERE OWNER = ? AND OBJECT_TYPE = 'PACKAGE BODY'",
+                        schema.getName()
+                );
             }
-        },
-        JAVA_DATA("JAVA DATA") {
-            @Override
-            public void dropObjects(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema) {
-                super.warnUnsupported(database.quote(schema.getName()));
-            }
-        },
-
-        // SYS-owned objects, cannot be dropped when a schema gets cleaned, simply ignore them.
-        CAPTURE("CAPTURE"),
-        APPLY("APPLY"),
-        DIRECTORY("DIRECTORY"),
-        RESOURCE_PLAN("RESOURCE PLAN"),
-        CONSUMER_GROUP("CONSUMER GROUP"),
-        JOB_CLASS("JOB CLASS"),
-        WINDOWS("WINDOW"),
-        EDITION("EDITION"),
-        AGENT_DESTINATION("DESTINATION"),
-        UNIFIED_AUDIT_POLICY("UNIFIED AUDIT POLICY");
+        };
 
         /**
          * The name of the type as it mentioned in the Data Dictionary and the DROP statement.
@@ -777,63 +465,41 @@ public class DMSchema extends Schema<DMDatabase, DMTable> {
          * @throws SQLException if retrieving of object types failed.
          */
         public static Set<String> getObjectTypeNames(JdbcTemplate jdbcTemplate, DMDatabase database, DMSchema schema) throws SQLException {
-            boolean xmlDbAvailable = database.isXmlDbAvailable();
-
-
-
-
-
-
-
-
             String query =
-                    // Most object types can be correctly selected from DBA_/ALL_OBJECTS.
-                    "SELECT DISTINCT OBJECT_TYPE FROM " + database.dbaOrAll("OBJECTS") + " WHERE OWNER = ? " +
-                            // Materialized view logs.
-                            "UNION SELECT '" + MATERIALIZED_VIEW_LOG.getName() + "' FROM DUAL WHERE EXISTS(" +
-                            "SELECT * FROM ALL_MVIEW_LOGS WHERE LOG_OWNER = ?) " +
-                            // Dimensions.
-                            "UNION SELECT '" + DIMENSION.getName() + "' FROM DUAL WHERE EXISTS(" +
-                            "SELECT * FROM ALL_DIMENSIONS WHERE OWNER = ?) " +
-                            // Queue tables.
-                            "UNION SELECT '" + QUEUE_TABLE.getName() + "' FROM DUAL WHERE EXISTS(" +
-                            "SELECT * FROM ALL_QUEUE_TABLES WHERE OWNER = ?) " +
-                            // Database links.
-                            "UNION SELECT '" + DATABASE_LINK.getName() + "' FROM DUAL WHERE EXISTS(" +
-                            "SELECT * FROM " + database.dbaOrAll("DB_LINKS") + " WHERE OWNER = ?) " +
-                            // Contexts.
-                            "UNION SELECT '" + CONTEXT.getName() + "' FROM DUAL WHERE EXISTS(" +
-                            "SELECT * FROM " + database.dbaOrAll("CONTEXT") + " WHERE SCHEMA = ?) " +
-                            // XML schemas.
-                            (xmlDbAvailable
-                                    ? "UNION SELECT '" + XML_SCHEMA.getName() + "' FROM DUAL WHERE EXISTS(" +
-                                    "SELECT * FROM " + database.dbaOrAll("XML_SCHEMAS") + " WHERE OWNER = ?) "
-                                    : "") +
-                            // Credentials.
+                // 主要对象类型
+                "SELECT DISTINCT OBJECT_TYPE FROM ALL_OBJECTS WHERE OWNER = ? " +
+                // 表
+                "UNION SELECT 'TABLE' FROM DUAL WHERE EXISTS(" +
+                "SELECT * FROM DBA_TABLES WHERE OWNER = ?) " +
+                // 视图
+                "UNION SELECT 'VIEW' FROM DUAL WHERE EXISTS(" +
+                "SELECT * FROM DBA_VIEWS WHERE OWNER = ?) " +
+                // 索引
+                "UNION SELECT 'INDEX' FROM DUAL WHERE EXISTS(" +
+                "SELECT * FROM DBA_INDEXES WHERE OWNER = ?) " +
+                // 序列
+                "UNION SELECT 'SEQUENCE' FROM DUAL WHERE EXISTS(" +
+                "SELECT * FROM DBA_SEQUENCES WHERE SEQUENCE_OWNER = ?) " +
+                // 存储过程
+                "UNION SELECT 'PROCEDURE' FROM DUAL WHERE EXISTS(" +
+                "SELECT * FROM DBA_PROCEDURES WHERE OWNER = ?) " +
+                // 函数
+                "UNION SELECT 'FUNCTION' FROM DUAL WHERE EXISTS(" +
+                "SELECT * FROM DBA_PROCEDURES WHERE OWNER = ? AND OBJECT_TYPE = 'FUNCTION') " +
+                // 包
+                "UNION SELECT 'PACKAGE' FROM DUAL WHERE EXISTS(" +
+                "SELECT * FROM DBA_PROCEDURES WHERE OWNER = ? AND OBJECT_TYPE = 'PACKAGE') " +
+                // 触发器
+                "UNION SELECT 'TRIGGER' FROM DUAL WHERE EXISTS(" +
+                "SELECT * FROM DBA_TRIGGERS WHERE OWNER = ?) " +
+                // 同义词
+                "UNION SELECT 'SYNONYM' FROM DUAL WHERE EXISTS(" +
+                "SELECT * FROM DBA_SYNONYMS WHERE OWNER = ?) " +
+                // 数据库链接
+                "UNION SELECT 'DATABASE LINK' FROM DUAL WHERE EXISTS(" +
+                "SELECT * FROM DBA_DB_LINKS WHERE OWNER = ?)";
 
-
-
-                                    "UNION SELECT '" + CREDENTIAL.getName() + "' FROM DUAL WHERE EXISTS(" +
-                                            "SELECT * FROM ALL_SCHEDULER_CREDENTIALS WHERE OWNER = ?) "
-
-
-
-
-
-
-
-
-                    ;
-
-            int n = 6 + (xmlDbAvailable ? 1 : 0) +
-
-
-
-                            1
-
-
-
-                    ;
+            int n = 11; // 参数数量
             String[] params = new String[n];
             Arrays.fill(params, schema.getName());
 
@@ -850,18 +516,7 @@ public class DMSchema extends Schema<DMDatabase, DMTable> {
             Set<String> existingTypeNames = new HashSet<>(getObjectTypeNames(jdbcTemplate, database, schema));
 
             // Remove unsupported types.
-            existingTypeNames.removeAll(Arrays.asList(
-                    DATABASE_LINK.getName(),
-                    CREDENTIAL.getName(),
-                    DATABASE_DESTINATION.getName(),
-                    SCHEDULER_GROUP.getName(),
-                    CUBE.getName(),
-                    CUBE_DIMENSION.getName(),
-                    CUBE_BUILD_PROCESS.getName(),
-                    MEASURE_FOLDER.getName(),
-                    ASSEMBLY.getName(),
-                    JAVA_DATA.getName()
-            ));
+            existingTypeNames.removeAll(Collections.singletonList(DATABASE_LINK.getName()));
 
             return !existingTypeNames.isEmpty();
         }

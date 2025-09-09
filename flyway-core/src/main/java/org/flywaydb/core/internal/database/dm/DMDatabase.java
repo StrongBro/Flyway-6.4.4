@@ -64,9 +64,9 @@ public class DMDatabase extends Database<DMConnection> {
         // 只知道8版本开始，不知道能兼容到几, 先8.0-9.9版本
         ensureDatabaseIsRecentEnough("8.0");
 
-        ensureDatabaseNotOlderThanOtherwiseRecommendUpgradeToFlywayEdition("9.9", org.flywaydb.core.internal.license.Edition.ENTERPRISE);
+        ensureDatabaseNotOlderThanOtherwiseRecommendUpgradeToFlywayEdition("8.0", org.flywaydb.core.internal.license.Edition.ENTERPRISE);
         //推荐就是8以上
-        recommendFlywayUpgradeIfNecessary("8.x");
+        recommendFlywayUpgradeIfNecessary("8.0");
     }
 
     @Override
@@ -169,7 +169,7 @@ public class DMDatabase extends Database<DMConnection> {
      * @throws SQLException if the check failed.
      */
     private boolean isDataDictViewAccessible(String owner, String name) throws SQLException {
-        return queryReturnsRows("SELECT * FROM ALL_TAB_PRIVS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?" +
+        return queryReturnsRows("SELECT * FROM ALL_TAB_PRIVS WHERE OWNER = ? AND TABLE_NAME = ?" +
                 " AND PRIVILEGE = 'SELECT'", owner, name);
     }
 
@@ -205,7 +205,7 @@ public class DMDatabase extends Database<DMConnection> {
      */
     private Set<String> getAvailableOptions() throws SQLException {
         return new HashSet<>(getMainConnection().getJdbcTemplate()
-                .queryForStringList("SELECT PARAMETER FROM V$OPTION WHERE VALUE = 'TRUE'"));
+                .queryForStringList("SELECT PARA_NAME FROM V$OPTION WHERE PARA_VALUE = 'TRUE'"));
     }
 
     /**
@@ -258,41 +258,8 @@ public class DMDatabase extends Database<DMConnection> {
      */
     Set<String> getSystemSchemas() throws SQLException {
 
-        // The list of known default system schemas
-        Set<String> result = new HashSet<>(Arrays.asList(
-                "SYS", "SYSTEM", // Standard system accounts
-                "SYSBACKUP", "SYSDG", "SYSKM", "SYSRAC", "SYS$UMF", // Auxiliary system accounts
-                "DBSNMP", "MGMT_VIEW", "SYSMAN", // Enterprise Manager accounts
-                "OUTLN", // Stored outlines
-                "AUDSYS", // Unified auditing
-                "ORACLE_OCM", // Oracle Configuration Manager
-                "APPQOSSYS", // Oracle Database QoS Management
-                "OJVMSYS", // Oracle JavaVM
-                "DVF", "DVSYS", // Oracle Database Vault
-                "DBSFWUSER", // Database Service Firewall
-                "REMOTE_SCHEDULER_AGENT", // Remote scheduler agent
-                "DIP", // Oracle Directory Integration Platform
-                "APEX_PUBLIC_USER", "FLOWS_FILES", /*"APEX_######", "FLOWS_######",*/ // Oracle Application Express
-                "ANONYMOUS", "XDB", "XS$NULL", // Oracle XML Database
-                "CTXSYS", // Oracle Text
-                "LBACSYS", // Oracle Label Security
-                "EXFSYS", // Oracle Rules Manager and Expression Filter
-                "MDDATA", "MDSYS", "SPATIAL_CSW_ADMIN_USR", "SPATIAL_WFS_ADMIN_USR", // Oracle Locator and Spatial
-                "ORDDATA", "ORDPLUGINS", "ORDSYS", "SI_INFORMTN_SCHEMA", // Oracle Multimedia
-                "WMSYS", // Oracle Workspace Manager
-                "OLAPSYS", // Oracle OLAP catalogs
-                "OWBSYS", "OWBSYS_AUDIT", // Oracle Warehouse Builder
-                "GSMADMIN_INTERNAL", "GSMCATUSER", "GSMUSER", // Global Data Services
-                "GGSYS", // Oracle GoldenGate
-                "WK_TEST", "WKSYS", "WKPROXY", // Oracle Ultra Search
-                "ODM", "ODM_MTR", "DMSYS", // Oracle Data Mining
-                "TSMSYS" // Transparent Session Migration
-        ));
-
-        result.addAll(getMainConnection().getJdbcTemplate().queryForStringList(
-                                "SELECT USERNAME FROM ALL_USERS "
-                                        + "WHERE REGEXP_LIKE(USERNAME, '^(APEX|FLOWS)_\\d+$')"
-                                        + " OR ORACLE_MAINTAINED = 'Y'"));
-        return result;
+        // 达梦数据库的系统表，防止flyway clean误删
+        //result.addAll(getMainConnection().getJdbcTemplate().queryForStringList("SELECT USERNAME FROM ALL_USERS " + "WHERE REGEXP_LIKE(USERNAME, '^(APEX|FLOWS)_\\d+$')"));
+        return new HashSet<>(Arrays.asList("SYS","SYSAUDITOR","SYSDBA","SYSSSO","CTISYS"));
     }
 }
